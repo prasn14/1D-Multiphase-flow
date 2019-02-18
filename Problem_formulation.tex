@@ -1,0 +1,262 @@
+\documentclass[a4paper,16pt]{article}
+\title{\large \bf 1D multiphase flow model with geometric source terms}
+\author{Pavankumar and Prasanna Varadarajan }
+\date{}
+\newcommand{\bg}{\mathbf g}
+\newcommand{\bm}{\mathbf m}
+\newcommand{\bQ}{\mathbf Q}
+\newcommand{\bA}{\mathbf A}
+\newcommand{\bL}{\mathbf L}
+\newcommand{\bR}{\mathbf R}
+\newcommand{\bx}{\mathbf x}
+\newcommand{\bLam}{\boldsymbol \Lambda}
+\newcommand{\bI}{\mathbf I}
+\newcommand{\br}{\mathbf r}
+\newcommand{\half}{{\scriptstyle{\frac{1}{2}}}}
+\usepackage{nomencl}
+\usepackage{amsmath}
+\usepackage{graphicx}
+\usepackage{subfigure}
+\makeglossary
+\begin{document}
+\maketitle
+\section{Abstract}
+The governing equation for the 1D mutiphase flow in a varying cross section pipe with the closure of the drift flux model is proposed. The area gradient components of the source term is considered for flow in a pipe with varying cross sectional area. If we consider the time varying area gradient term to represent a pseudo scalar, its transport can mean a moving cylinder in the pipe. This could help solve problems when there is pipe motion in the drilling industry and is called tripping operations. The governing equations are formulated with drift flux approach and the numerical solver is designed to solve the system of equations. It is well known that the 1D multiphase flow model suffers from the clear definition of hyperbolic nature as it is difficult to obtain a neat analytical expression for Jacobian matrix which limits us to formulate a Roe type Riemann solver. Second to that, the geometric source terms with gradients need up winding to ensure stability.  To solve the two issues, we use a slightly different approach, we wish to solve the system of equations using Lax Wendroff method and resort to time based limiting of the work(cite shock dynamics work and Roe and Lungs work). The approach avoids solving the Riemann problem and the time based limiting gives us second order accuracy. Test cases are considered for simple gas migration without the moving pipe and then used to simulate the area gradient terms for replicating tripping scenarios in multiphase drilling operations.
+\section{Introduction}
+Multi-phase flows are encountered in various Engineering applications. In this report we would concentrate on the fluid model that describes the two phase flow inside a pipe with phases denoted by liquid and vapor. The discussed model is a one dimensional drift flux model consisting of two mass conservation equations and one mixture momentum equation. The liquid and the gas velocities are related by the drift flux law. The aim of this work is to understand  the physics described by the model and to capture it efficiently using a robust and an accurate numerical scheme.
+
+Initially for the case of simplicity we consider no mass transfer between the vapor and liquid i.e. between the two fluids considered. The overall report is organized with the derivation of the governing equations for a two fluid flow.  The detailed derivation of the Jacobian of the system and its eigen-values is also presented denoting its complexity in engineering a suitable Roe's type Riemann solver for computation of the fluxes and hence its numerical solution.
+
+Then the numerical strategy employed is discussed to solve this system of equation. In this work we have implemented computation of the fluxes borrowing the idea of Flux corrected transport,  where the flux obtained by a two step Lax Wendroff method is averaged with a HLL type solver. The non-linear averaging with limiting ensures that Godunov's theorem is not violated. More smart way is required for the choice of the variables that needs limiting.
+
+A few test cases are presented for the case of a homogeneous flow(the setup where the slip law is turned off and the equations are solved with the assumption of no jump in velocity field between the two fluids). This is done for comparison with the well known results in literature and to ensure the fidelity of the code. Finally the results are presented with the implementation of the slip law for the gas kick case and shut-in conditions inside a drill hole.
+
+The second part of the report deals with the implementation of the model setup with mass transfer. The liquid component oil is considered non volatile and only the solubility of the gas component into the vapour phase is considered. The computational method is discussed along with the results for the gas kick case and then shut in conditions to see the effects of mass transfer.
+\section{Governing equations - two phase flow}
+We consider a 1-D fluid flow of a two phase system with the mixture of liquid and gas species and for the case of mathematical simplicity we assume no mass transfer between the liquid and the gas species. The assumptions are
+ \begin{itemize}
+ \item fluid flow is inside a duct with a varying cross sectional area A
+ \item isothermal flow conditions with ideal equation of state for both the fluids
+ \item both the fluids are compressible
+ \item mechanical equilibrium between both the phases so that the pressure in each phase is the same
+ \end{itemize}
+Consider a mixture of liquid with density $\rho_{l}$, velocity $u$ and gas(vapor phase) density be $\rho_{g}$ and velocity $v$. Let $\alpha$ be vapour volume fraction so that the average mixture density and velocity is defined as
+ \begin{align}
+\rho_{m} &= (1-\alpha)\rho_{l} + \alpha \rho_{g}\\
+u_{m} &= \frac{(1-\alpha)\rho_{l}u + \alpha \rho_{g}v}{(1-\alpha)\rho_{l} + \alpha \rho_{g}}\\
+u_V &= (1-\alpha)u + \alpha v
+ \end{align}
+where the density is averaged based on the volume fraction and $u_m$ represents the velocity averaged based on the mass fraction and $u_V$ represents the volumetric averaged velocity. $p_{l}$ and $p_{g}$ represent the pressure of the liquid and vapor phases and $a_{l}$,$a_{g}$ being the sound speeds in the respective phases.
+\subsection{Mass conservation equation}
+Considering the 1-D standard volume for the conservation of both the liquid and the vapour we have the mass conservation equation as
+\begin{eqnarray}
+\frac{\partial{(1-\alpha)\rho_{l}}A}{\partial t} + \frac{\partial{(1-\alpha)\rho_{l}}u A}{\partial{x}} &=& 0\\
+\label{cons_liquid}
+%\end{equation}
+%\begin{equation}
+\frac{\partial{\alpha \rho_g} A}{\partial t} + \frac{\partial{\alpha \rho_{g}}v A}{\partial{x}} &=& Q
+\label{cons_gas}
+\end{eqnarray}
+where Q represents the influx of gas seeping into the system from the formation and A is area of cross section of the pipe. Adding both the above equations we can write it as
+\begin{equation}
+\frac{\partial{\rho_{m}} A}{\partial t} + \frac{\partial{\rho_{m}}u_{m}A}{\partial{x}} = Q
+\label{cons_mixture}
+\end{equation}
+Now replacing flux term in the equation \ref{cons_gas} can be re written as
+\begin{eqnarray}
+\alpha \rho_{g}v &=& \alpha \rho_{g}v + \alpha \rho_{g} u_m - \alpha \rho_{g} u_m \\
+ &=& \alpha \rho_{g} u_m + \alpha \rho_{g}(v - u_m)\\
+ &=& \alpha \rho_{g} u_m + \alpha \rho_{g}(v - \frac{(1-\alpha)\rho_{l}u + \alpha \rho_{g}v}{(1-\alpha)\rho_{l} + \alpha \rho_{g}})\\
+ &=& \alpha \rho_{g} u_m + \alpha \rho_{g}( \frac{\rho_m v -(1-\alpha)\rho_{l}u - \alpha \rho_{g}v}{\rho_m})\\
+ &=& \alpha \rho_{g} u_m + \alpha \rho_{g} \frac{(1-\alpha)\rho_{l}(v-u)}{\rho_m}\\
+ &=& \alpha \rho_{g} u_m + \alpha \rho_{g} (1-\frac{\alpha \rho_{g}}{\rho_m})(v-u)\\
+\end{eqnarray}
+The conservation of gas is written in terms of the flux convected by the average velocity $u_m$ and is given as
+\begin{equation}
+\frac{\partial{\alpha \rho_g} A}{\partial t} + \frac{\partial{(\alpha \rho_{g} u_m A + \alpha \rho_{g} A (1-\frac{\alpha \rho_{g}}{\rho_m})(v-u))}}{\partial{x}} = Q
+\label{cons_gas_um}
+\end{equation}
+This shows the presence of the drift flux term (the term containing the difference of the phase velocities).
+\subsection{Momentum conservation equation}
+Similarly writing the conservation of momentum of the species
+\begin{equation}
+\frac{\partial (\rho_{m}u_{m})A}{\partial t} + \frac{\partial{((1-\alpha)\rho_{l}u^2 A + \alpha \rho_{g}v^2 A + pA})} {\partial{x}} = -p_{fric} A + p\frac{dA}{dx} - \rho_m A g cos(\theta)
+\label{cons_mix_mom}
+\end{equation}
+We assume mechanical equilibrium between phases and thus
+\begin{equation}
+p = p_l = p_g
+\end{equation}
+The $p_{fric}$ represents the friction losses associated with the pipe flow, $g$ the gravitational acceleration and $\theta$ corresponds to the orientation of the duct/pipe (= 0 to a vertical duct and $\theta$ = $\pi$/2 for a horizontal duct).
+Following a similar approach to that taken to simply the flux in the gas conservation equation, let us write the momentum flux in terms of the average quantities. The working is as shown below
+\begin{align}
+\rho_m u_m ^2-((1-\alpha)\rho_{l}u^2+\alpha \rho_{g}v^2)=\\
+=\frac{(\rho_l(1-\alpha)u+\rho_g \alpha v)^2}{\rho_m}-((1-\alpha)\rho_{l}u^2+\alpha \rho_{g}v^2)\\
+=\frac{\rho_l^2(1-\alpha)^2u^2+\rho_g^2 \alpha^2 v^2 + 2 \rho_l \rho_g (1-\alpha)\alpha u v - ((1-\alpha)\rho_{l}u^2+\alpha \rho_{g}v^2) \rho_m}{\rho_m}\\
+=\frac{2 \rho_l \rho_g (1-\alpha)\alpha u v - ((1-\alpha)\alpha \rho_{l}\rho_g (u^2+v^2))}{\rho_m}\\
+\rho_m u_m ^2-((1-\alpha)\rho_{l}u^2+\alpha \rho_{g}v^2)=-\frac{\rho_l \rho_g (1-\alpha)\alpha (u-v)^2}{\rho_m}
+\end{align}
+Thus the momentum equation can be re written as
+\begin{equation}
+\frac{\partial (\rho_{m}u_{m}A)}{\partial t} + \frac{\partial({\rho_m u_m ^2 A + \frac{\rho_l \rho_g (1-\alpha)\alpha (u-v)^2}{\rho_m} A + pA})} {\partial{x}} = -p_{fric} A + p\frac{dA}{dx} - \rho_m A g cos(\theta)
+\label{cons_mix_mom}
+\end{equation}
+Other useful closures for the system of equations is as follows 
+\subsection{Pressure as a function of the conserved variables}
+Since we have assumed mechanical equilibrium, the pressure in both the liquid and vapour phases are the equal. The equation of state assuming ideal fluid for both the phases are
+\begin{eqnarray}
+p_l &=& p_{ref} + a_l^2(\rho_l-\rho_{ref})\\
+p_g &=& \rho_g a_g^2
+\end{eqnarray}
+where $p_{ref}$ and $\rho_{ref}$ represent the reference liquid pressure and density.  From the equation for the averaged density and noting that the sum of the volume fractions of each species equals unity we can write
+\begin{eqnarray}
+\frac{(1-\alpha)\rho_l}{\rho_l} + \frac{\alpha\rho_g}{\rho_g} &=& 1\\
+\frac{\rho_m - \alpha\rho_g}{\frac{p - p_{ref}}{a_l^2} + \rho_{ref}} + \frac{\alpha\rho_g}{\frac{p}{a_g^2}}&=& 1
+\end{eqnarray}
+This equation is quadratic in p and thus writing down the positive root of this equation we have
+\begin{eqnarray}
+p &=& \frac{z}{2} + \frac{1}{2}\sqrt{z^2 - 4\rho_g \alpha a_g^2(p_{ref} - a_l^2 \rho_{ref})} \\
+z &=& p_{ref} - a_l^2\rho_{ref} + \rho_g \alpha a_g^2 +  a_l^2(\rho_m - \rho_g \alpha)
+\end{eqnarray}
+\subsection{Drift flux law}
+In this study we would like to take into consideration the classical drift flux law that relates the difference between both the fluid and the vapour phase velocities. The relation has been obtained by a large body of experimental observations of vapour-liquid two phase flow done at SCR. It is given by
+\begin{equation}
+v - u = \frac{(C-1)((1-\alpha)u+\alpha v)+ v_s}{1-\alpha}
+\end{equation}
+where $C$ and $v_s$ are functions of fluid properties and phase volume fraction. We can simplify the above expression for the drift law and then use
+\begin{equation}
+v  = \frac{u C(1-\alpha) + v_s}{1-C\alpha}
+\end{equation}
+Substituting this in the equation for mixture velocity we have
+\begin{eqnarray}
+u_m = \frac{(1-\alpha)\rho_l u}{\rho_m} + \frac{\alpha \rho_g}{\rho_m}(\frac{u C(1-\alpha) + v_s}{1-C\alpha})\\
+u = \frac{\rho_m u_m (1-C\alpha) - \alpha \rho_g v_s}{(1-\alpha)\rho_l(1-C\alpha) + \alpha \rho_g C(1-\alpha)}
+\end{eqnarray}
+Now rewriting the velocity difference as a function of the conserved quantities we have
+\begin{eqnarray}
+v - u &=& \frac{v_s}{1-C\alpha} + \frac{(\rho_m u_m(1-C\alpha) - \alpha \rho_g v_s)(C-1)}{((\rho_m - \alpha \rho_g)(1-C\alpha) + \alpha \rho_g C(1-\alpha))(1-C\alpha)}\\
+&=& \frac{v_s}{1-C\alpha} + \frac{(\rho_m u_m(1-C\alpha) - \alpha \rho_g v_s)(C-1)}{(\rho_m (1-C\alpha) - \alpha \rho_g (1-C))(1-C\alpha)}\\
+\end{eqnarray}
+We still have in the equation $\alpha$, C and $v_s$ which still have to be related to the conserved variables.
+\subsection{Equation for the volume fraction $\alpha$}
+From the averaged density equation and the equation of state for the fluid phase we have
+\begin{eqnarray}
+(1-\alpha)\rho_l = \rho_m - \alpha \rho_g \\
+\rho_l = \frac{p-p_{ref}}{a_l^2} + \rho_{ref}
+\end{eqnarray}
+from which we can write the equation for $\alpha$ as
+\begin{equation}
+\alpha = 1 - \frac{(\rho_m - \alpha \rho_g)a_l^2}{p - p_{ref} + \rho_{ref} a_l^2}
+\end{equation}
+\subsection{Slip law}
+The equations for $C$ and $v_s$ are given based on the available experimental data for water and air two fluid mixture.(List of references needs to be added)
+\begin{equation}
+\label{C_slip}
+C(\alpha) =
+\begin{cases}
+1 & \text{ 0 $\le$ $\alpha$ $\le$ 0.015} \\
+1 + 4.1176(\alpha-0.015) & \text{0.015 $<$ $\alpha$ $\le$ 0.1}\\
+1.35 & \text{0.1 $<$ $\alpha$ $\le$ 0.4}\\
+1 + 0.5833(1-\alpha) & \text{0.4 $<$ $\alpha$ $\le$ 1.0}\\
+\end{cases}
+\end{equation}
+
+\begin{equation}
+\label{velocity_slip}
+v_s(\alpha) =
+\begin{cases}
+0 & \text{ 0 $\le$ $\alpha$ $\le$ 0.015} \\
+5.8823(\alpha-0.015) & \text{0.015 $<$ $\alpha$ $\le$ 0.1}\\
+0.5 & \text{0.1 $<$ $\alpha$ $\le$ 0.4}\\
+0.8333(1-\alpha) & \text{0.4 $<$ $\alpha$ $\le$ 1.0}\\
+\end{cases}
+\end{equation}
+
+Since p is a function of $(\rho_m,\alpha \rho_g)$ and so is $\alpha$, $C$ and $v_s$. Thus with this we have all the components of the flux function in terms of the conserved variables.
+
+\section{Casting the governing equations in a suitable form}
+Thus the 1D fluid model for the two phase flow without mass transfer(for the mass transfer case also the equations can be cast in the conservation form - derived later in the report)can be written in the conservation form as
+\begin{equation}
+\textbf{U}_t + \textbf{F}_x + \textbf{G}_x + \textbf{M} = \textbf{Q}
+\end{equation}
+
+\begin{eqnarray}
+ \textbf{U} &=& \left( \begin{array}{c} \rho_m  \\ \rho_g \alpha  \\ \rho_m u_m  \end{array} \right)\\
+ \textbf{F} &=& \left( \begin{array}{c} \rho_m u_m  \\ \alpha \rho_{g} u_m \\ {\rho_m u_m ^2 + p}  \end{array} \right)\\
+  \textbf{G} &=& \left( \begin{array}{c} 0  \\ \alpha \rho_{g} (1-\frac{\alpha \rho_{g}}{\rho_m})(v-u)  \\ \frac{\rho_l \rho_g (1-\alpha)\alpha (u-v)^2}{\rho_m}  \end{array} \right)\\
+  \textbf{M} &=& \left( \begin{array}{c} \frac{\rho_m}{A}\frac{\partial A}{\partial t} + \frac{\rho_m u_m}{A}\frac{\partial A}{\partial x} \\ \frac{\rho_g \alpha}{A}\frac{\partial A}{\partial t} + \frac{\rho_g \alpha v}{A}\frac{\partial A}{\partial x}  \\ \frac{\rho_m u_m}{A}\frac{\partial A}{\partial t} + \frac{\rho_l (1-\alpha) u^2 +\rho_g \alpha v^2}{A}\frac{\partial A}{\partial x}   \end{array} \right)\\
+  \textbf{Q} &=& \left( \begin{array}{c} \ Q \\ Q  \\ -p_{fric} - \rho_m g cos(\theta)  \end{array} \right)
+\end{eqnarray}
+The mass conservation equations can be used in either combination of mass conservation of liquid, gas or the overall conservation. We here retain the conservation of the gas species along with overall mass conservation equation along with the momentum conservation equation. 
+
+It is interesting that in the above equation the terms G and M adds the computational complexity. The slip law terms in G makes it difficult to formalize a Riemann type solver and the M contains terms with geometric gradients which needs to upwinding. 
+
+The proposal for the numerical solver is as follows, we use the two step LAx Wendroff method and do an update in getting the star variables for half the time step.  Now for the full update, we use the method as proposed in the work of shock dynamics and Lung and Roe. The value of updated terms are corrected based on time based limiting rather than spatial gradients of the variables alone and then the solution is updated (needs further elaboration and rewriting). 
+
+\subsection{Two step Lax Wendroff solver}
+In this work the two step Lax Wendroff solver is implemented as shown
+First step is
+\begin{equation}
+U^*(U_L,U_R) = \frac{U_L+ U_R}{2} - \frac{dt}{2 dx}(F(U_R)-F(U_L) + G(U_R)-G(U_L)) - M + Q   \\
+\end{equation}
+and since we just need the flux at the interface obtained from this method rather than the solution. The second step is computing the Flux at the interface from the value of $U^*(U_L,U_R)$. The original Lax Wendroff method would use this star state to get the fluxes at the interface and then update the conserved vector.
+The numerical procedure can be formulated as follows, 
+ \begin{itemize}
+ 	\item The conservative variables can be updated to half time step by the first step of the Lax Wendroff solver
+ 	\item In the second step we use the update by modifying the updated values by updating the driver quantities and then limiting it with the smoothing function 
+ 	\item In the final step we use the corrected value of the variables from the previous step and complete the second step update of the Lax Wendroff method
+ \end{itemize}
+
+
+\begin{enumerate}
+	\item Interpolate the initial estimate of conservative variables from the cell centered values of $\textbf{U}$ to the vertex or node which is the $\frac{U_L+ U_R}{2}$ term in above Lax Wendroff time stepping. This term needs to be changed in case of non uniform grids.
+	\item Evolve $\textbf{U}_v$ to $n+1/2$ time level using a Lax Wendroff type procedure and obtain the provisional solution $\textbf{U}_v^*$ at the cell interface. This is done as follows 
+	\begin{equation}
+	U_v^*(U_L,U_R) = U_v - \frac{dt}{2 dx}(F(U_R)-F(U_L) + G(U_R)-G(U_L)) - M + Q   \\
+	\end{equation}
+	In the above equation for the term $M$, the geometric gradients are calculated at the interface and coefficients which are the function of conservative variables are calculated based on the average values at the interface
+	\item We can update the Lax Wendroff step to get the second order solution which we can call as a the provisional one at the cell center
+	\begin{equation}
+	U_c^*(U_L,U_R) = U_c^n - \frac{dt}{2 dx}(F(U_{vR}^*)-F(U_{vR}^*) + G(U_{vR}^*)-G(U_{vL}^*)) - M(U_v^*) + Q \\
+	\end{equation}
+	\item We have a second order solution and once we have this would like to have it limited. The idea is as follows, the interface update that we have obtained if is limited in time then we can have a more accurate result for the above given update. The main goal is thus to limit the conservative terms in the cell interface. The idea of limiting is borrowed from the works of Lung and Roe for the scalar advection equation and its extension to Lagrangian hydrodynamics. The limited quantity at the interface is thus given as 
+	\begin{equation}
+	\textbf{U}_v^{n+1/2} = \textbf{U}_v^* + f_0(\phi,\nu) \textbf{B}^n + f_1(k,\phi,\nu)(\textbf{B}^*-\textbf{B}^n)
+	\end{equation}
+	where the driver quantities are given as follows
+	\begin{equation}
+	\textbf{B} = - \frac{dt}{2 dx}(F(U_R)-F(U_L) + G(U_R)-G(U_L)) - M + Q
+	\end{equation}
+	The value of $B^*$ is calculated based on the $U_c^*(U_L,U_R)$.    
+	 
+The function for tuning is given as follows
+	\begin{eqnarray}
+	f_{0} &=& \max[0,1-f(\nu)\phi] \\
+	f_1 &=& k \min [\frac{f(\nu)}{\phi},1] \\
+	f(\nu) &=& \frac{3(1-\nu)}{2}
+	\end{eqnarray}
+	where $\nu$ is obtained based on the wavespeeds. Since we have acoustic waves and the advective term, we can limit the mass variables by defining the wave speed based on average fluid velocity, and then the acoustic waves for the momentum equation. The wavespeeds are calculated based on the assumption that the 
+	The results are obtained for first order upwinding scheme for scalar advection from the works of  Lung and Roe \cite{lung2014toward,lungisotropic}.  In the current version of implementation, the value of $\phi_m$ is considered for the evolution of the scalar value of $m$ in each shock patch. More work needs to be done in separating the evolution of the shock strength and the normal. We consider two such ratios for two different variation the scheme, one where the smoothness monitor is constructed by looking at the ratio of the second and the third order terms and the other by looking at the ratio of the first and the second order terms. Currently we are looking mainly at the absolute value of the defined driver quantity.  Thus the two definitions of the smoothness monitor is as follows
+	\begin{eqnarray}
+	\phi_{m1} &=& |\frac{B^n}{m^n}| \\
+	\phi_{m2} &=& |\frac{B^* - B^n}{2B^n}|
+	\end{eqnarray}
+	\item Update the shock patch to the $n+1$ time interval using $\textbf{m}_n^{n+1/2}$
+	\item Once the shock patch is updated, calculate the normal and area of the shock patch from geometry, update the cell averaged mach number from the area mach relation. The values of $\textbf{g}_{1}$ and $\textbf{g}_{2}$ can be obtained from geometry.
+\end{enumerate}
+A few different versions of the scheme are tried out for computing the solution and for the sake of clarity we name them as follows
+\begin{enumerate}
+	\item $GSDRR$ scheme based on the version described earlier with Method I with no limiting
+	\item $GSDRRLIM1$ scheme with smoothness monitor $\phi_{m1}$ as defined above. A slight variation is considered with having only function $f_0$ and calling the scheme as $GSDRRLIM1-A$ and the scheme having $f_0$ and $f_1$  is called as $GSDRRLIM1-B$
+	\item $GSDRRLIM2$ scheme with  smoothness monitor $\phi_{m2}$ as defined above.   A slight variation is considered with having only function $f_0$ and calling the scheme as $GSDRRLIM2-A$ and the scheme having $f_0$ and $f_1$ is called as $GSDRRLIM2-B$
+\end{enumerate}
+The scheme is implemented in a set of test cases and the results are discussed.(\textit{It could be noted that the scheme $GSDRRLIM1-A$ has an advantage of not constructing the full provisional solution and is computationally efficient compared to the other schemes}
+
+
+
+
+
+\bibliography{mybib}
+\bibliographystyle{plain}
+
+\end{document}
